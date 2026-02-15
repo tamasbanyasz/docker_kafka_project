@@ -1,0 +1,17 @@
+kafka:
+  bootstrap_servers: "127.0.0.1:9092"
+  topic: "teszt-partitioned"
+  num_partitions: 3
+
+producer:
+  msgs_per_sec: 1000
+  compression_type: "snappy"
+  linger_ms: 5
+  batch_size: 32768
+
+consumer:
+  output_file: "../output/houses.jsonl"
+  flush_every: 100
+  log_every: 1000
+  consumer_group: false  # false = simple + file offsets (recommended), true = Kafka ConsumerGroup
+  group_id: "house-triplet-consumer"

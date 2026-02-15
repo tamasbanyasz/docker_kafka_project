@@ -1,0 +1,25 @@
+# Python
+venv/
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+.eggs/
+.pytest_cache/
+.mypy_cache/
+
+# Go
+*.exe
+*.test
+
+# Output (generated at runtime)
+output/houses.jsonl
+output/consumer_offsets.json
+output/consumer_offsets.json.tmp
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
