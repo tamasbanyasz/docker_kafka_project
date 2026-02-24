@@ -18,7 +18,7 @@ Közben elindul a **Consumer** – ez egy Go program, ami figyeli mind a három 
 
 Ha valaki „stornóz” egy házat – vagyis jelezni szeretné, hogy azt a házat ne vegyük figyelembe –, akkor egy másik csatornán (a `house-storno` topic) érkezik az üzenet. A consumer ezt is figyeli, és ha egy ház stornózva van, azt nem a normál listába írja, hanem külön egy `storno_houses.jsonl` fájlba – így mindig tudjuk, mely házak „érvénytelenek”.
 
-A consumer emlékszik arra is, hol tartott: melyik üzenetnél járt az egyes fiókokban. Ezt a `consumer_offsets.json` fájlba menti. Ha a program leáll és újraindul, onnan folytatja, ahol abbahagyta – nem kezdi elölről az egészet.
+A consumer emlékszik arra is, hol tartott: melyik üzenetnél járt az egyes fiókokban. Ezt a **Kafka intézi maga** – a consumer group offseteket a `__consumer_offsets` topicban tárolja. Ha a program leáll és újraindul, onnan folytatja, ahol abbahagyta – nem kezdi elölről az egészet.
 
 Összefoglalva: a Producer három részre bontja a házakat és a Kafkának küldi, a Consumer összegyűjti őket, összerakja, és fájlokba írja – a Kafka pedig közben a postahivatal szerepét tölti be, ami biztonságosan tárolja az üzeneteket.
 
