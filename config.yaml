@@ -4,14 +4,27 @@ kafka:
   num_partitions: 3
 
 producer:
-  msgs_per_sec: 1000
+  msgs_per_sec: 200   # 1000 = high load, 100-200 = lower CPU
   compression_type: "snappy"
-  linger_ms: 5
-  batch_size: 32768
+  linger_ms: 50       # longer = more batching, less CPU, less network
+  batch_size: 8192   # smaller = less memory
+  buffer_memory: 8388608   # 8MB producer buffer
+  acks: 1             # 1 = leader ack (throughput+safety), 0 = fire-and-forget
+  retries: 3          # retry on transient errors
 
 consumer:
   output_file: "../output/houses.jsonl"
-  flush_every: 100
+  flush_every: 1      # teszt: minden triplet után sync (crash safety), 100 = gyorsabb
   log_every: 1000
-  consumer_group: false  # false = simple + file offsets (recommended), true = Kafka ConsumerGroup
-  group_id: "house-triplet-consumer"
+  write_buffer_size: 262144   # 256KB bufio buffer (default 4KB)
+  house_chan_buffer: 512
+  max_pending_triplets: 50000   # evict oldest if exceeded
+  fetch_min_bytes: 1024        # Sarama: min bytes per fetch (fewer round-trips)
+  fetch_max_bytes: 10485760    # Sarama: max 10MB per fetch
+  offset_save_interval_sec: 30   # időzített offset mentés (crash safety); 0 = kikapcsolva
+  storno_flush_every: 50       # flush storno_houses every N houses
+  consumer_group: true     # true = Kafka offset; false = file offset (mind a 3 partition)
+  group_id: "my-service" # vagy hostname (üres = os.Hostname())
+  storno_topic: "house-storno"
+  storno_file: "../output/storno_ids.json"
+  storno_output_file: "../output/storno_houses.jsonl"

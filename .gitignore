@@ -15,6 +15,11 @@ __pycache__/
 # Output (generated at runtime)
 output/houses.jsonl
 output/consumer_offsets.json
+output/producer_base_id.json
+output/storno_ids.json
+output/storno_houses.jsonl
+output/houses_formatted.json
+output/producer_base_id.json.tmp
 output/consumer_offsets.json.tmp
 
 # IDE / OS

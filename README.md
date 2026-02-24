@@ -2,6 +2,26 @@
 
 A Python producer and Go consumer that send and receive correlated "house triplets" over Apache Kafka. Each triplet consists of three messages (foundation, wall, roof) with matching IDs, emitted across 3 topic partitions. The consumer joins them by ID and writes JSONL output.
 
+![Pipeline demo](src/gif/docker_kafka_test_2.gif)
+
+---
+
+## Hogyan működik? (A történet)
+
+Először elindítod a Kafkát – ez egy üzenetközpont, ami a háttérben fut, és várja az üzeneteket. Olyan, mint egy postahivatal: fogadja a küldeményeket, és tárolja őket, amíg valaki el nem jön érte.
+
+Aztán elindul a **Producer** – ez egy Python program, ami három „munkást” indít egyszerre. Mindegyik munkás egy ház egy-egy részét készíti: az első az alapot (foundation), a második a falat (wall), a harmadik a tetőt (roof). Minden másodpercben száz vagy ezer ilyen háromszoros üzenetet küldenek a Kafkának, és minden három rész ugyanazzal a számmal (ID) van megjelölve – így később össze tudjuk őket rakni.
+
+A Kafka három külön „fiókba” (partition) teszi az üzeneteket: az alapok az egyikbe, a falak a másikba, a tetők a harmadikba kerülnek. Így párhuzamosan dolgozhatnak, és nem keverednek össze.
+
+Közben elindul a **Consumer** – ez egy Go program, ami figyeli mind a három fiókot egyszerre. Amikor egy üzenet megérkezik, kiolvassa a rajta lévő ID-t, és egy belső „asztalra” teszi: „Ez az 5-ös ház alapja, ez a falja, ez a tetője.” Amint mind a három rész megvan ugyanahhoz az ID-hoz, összerakja őket egy teljes házba, és beleírja a `houses.jsonl` fájlba – soronként egy ház, JSON formátumban.
+
+Ha valaki „stornóz” egy házat – vagyis jelezni szeretné, hogy azt a házat ne vegyük figyelembe –, akkor egy másik csatornán (a `house-storno` topic) érkezik az üzenet. A consumer ezt is figyeli, és ha egy ház stornózva van, azt nem a normál listába írja, hanem külön egy `storno_houses.jsonl` fájlba – így mindig tudjuk, mely házak „érvénytelenek”.
+
+A consumer emlékszik arra is, hol tartott: melyik üzenetnél járt az egyes fiókokban. Ezt a `consumer_offsets.json` fájlba menti. Ha a program leáll és újraindul, onnan folytatja, ahol abbahagyta – nem kezdi elölről az egészet.
+
+Összefoglalva: a Producer három részre bontja a házakat és a Kafkának küldi, a Consumer összegyűjti őket, összerakja, és fájlokba írja – a Kafka pedig közben a postahivatal szerepét tölti be, ami biztonságosan tárolja az üzeneteket.
+
 ---
 
 ## Project Structure
@@ -10,12 +30,17 @@ A Python producer and Go consumer that send and receive correlated "house triple
 docker_kafka_project/
 ├── config.yaml          # Kafka, producer, consumer configuration
 ├── docker-compose.yml   # Apache Kafka (KRaft mode)
-├── requirements.txt    # Python dependencies
+├── requirements.txt     # Python dependencies
 ├── README.md
+├── src/
+│   └── gif/             # Demo GIF
+│       └── docker_kafka_test_2.gif
 ├── python/              # Python source code
 │   ├── producer_partitioned.py   # 3-partition producer (main)
-│   ├── producer.py              # Simple producer
-│   └── consumer.py               # Simple consumer
+│   ├── producer.py               # Simple producer
+│   ├── consumer.py               # Simple consumer
+│   ├── storno_producer.py        # Storno producer (single storno)
+│   └── storno_loop.py            # Periodic storno loop (test)
 ├── go/                  # Go source code
 │   ├── main.go          # Triplet-joining consumer
 │   ├── go.mod
@@ -23,10 +48,16 @@ docker_kafka_project/
 ├── run/                 # Startup scripts
 │   ├── kafka.ps1        # Start Kafka
 │   ├── producer.ps1     # Start producer
-│   └── consumer.ps1     # Start consumer
-└── output/              # Consumer output
+│   ├── consumer.ps1     # Start consumer
+│   ├── reset.ps1        # Clear output + delete Kafka topics
+│   ├── stop.ps1         # Stop producer/consumer processes
+│   ├── storno.ps1       # Single storno (by ID)
+│   └── storno_loop.ps1  # Periodic storno loop
+└── output/              # Consumer output (generated at runtime)
     ├── houses.jsonl     # Triplet JSONL output
-    └── consumer_offsets.json  # Crash-safe offset file (partition → last offset)
+    ├── storno_houses.jsonl
+    ├── storno_ids.json
+    └── consumer_offsets.json  # Crash-safe offset file (consumer_group: false)
 ```
 
 ---
@@ -81,7 +112,16 @@ cd c:\Users\Tulajdonos\Desktop\docker_kafka_project
 .\run\producer.ps1
 ```
 
-> **Note:** The producer script activates the venv automatically. Start the consumer first, then the producer. The producer sends ~3000 msg/s (1000 per partition). Completed triplets are written to `output/houses.jsonl`.
+### Terminal 4 (optional) – Storno loop
+
+Periodically stornos random houses to test producer + consumer + storno together:
+
+```powershell
+cd c:\Users\Tulajdonos\Desktop\docker_kafka_project
+.\run\storno_loop.ps1
+```
+
+> **Note:** The producer script activates the venv automatically. Start the consumer first, then the producer. The producer sends ~200–1000 msg/s per partition (configurable). Completed triplets are written to `output/houses.jsonl`.
 
 ---
 
@@ -95,6 +135,7 @@ cd c:\Users\Tulajdonos\Desktop\docker_kafka_project
 - **Topic:** `teszt-partitioned` (3 partitions)
 - **Listeners:** `PLAINTEXT://0.0.0.0:9092`, controller on `9093`
 - **Advertised:** `PLAINTEXT://127.0.0.1:9092` (use `127.0.0.1` for local clients)
+- **Memory:** `KAFKA_HEAP_OPTS: "-Xmx1G -Xms512M"` – a coordinator stabilitáshoz (consumer_group mode esetén)
 
 ### Producer
 
@@ -126,7 +167,7 @@ If the process crashes during write, the original `consumer_offsets.json` stays 
 | Method | Description | Pros | Cons |
 |--------|-------------|------|------|
 | **File (current)** | Offset stored in JSON file | Simple, no extra dependencies, works with any Kafka setup | Single consumer only, file must be writable |
-| **Kafka Consumer Group** | Kafka stores offsets in `__consumer_offsets` topic | Built-in, automatic, scales to multiple consumers | May not work with KRaft/older setups; this project has `consumer_group: true` as optional (unstable in some envs) |
+| **Kafka Consumer Group** | Kafka stores offsets in `__consumer_offsets` topic | Built-in, automatic, scales to multiple consumers | Requires KRaft/Kafka 2.8+; use `config.yaml` → `consumer_group: true` |
 | **Database** | Store offsets in PostgreSQL, MySQL, etc. | Shared state, transactional, queryable | Extra dependency, more complex |
 | **Redis** | Store offsets in Redis | Fast, shared across instances | Extra service, persistence config needed |
 
@@ -136,11 +177,36 @@ The consumer is designed for safe shutdown and minimal data loss:
 
 1. **Signal handling:** Listens for `SIGINT` (Ctrl+C) and `SIGTERM`
 2. **Graceful shutdown:** On signal, stops new processing and flushes buffers
-3. **Buffered I/O:** Uses `bufio.Writer`; flushes every N triplets (default: 100)
+3. **Immediate flush:** After each triplet write → `Flush()` + `Sync()` (no window between write and disk)
 4. **Exit flush:** Before exit, flushes remaining buffer and calls `Sync()` so data reaches disk
 5. **Shutdown sequence:** `Flush()` → `Sync()` → `Close()` on the output file
 
-If the process is killed abruptly (e.g. `kill -9`), at most `flush_every - 1` triplets may be lost from the buffer.
+With `flush_every: 1`, every triplet is synced immediately. For higher throughput use `flush_every: 100` (trade-off: up to 99 triplets may be lost on abrupt crash).
+
+### Időzített offset mentés
+
+- `offset_save_interval_sec` – háttérben 30 mp-enként menti a `consumer_offsets.json`-t
+- Csökkenti az adatvesztést crash esetén (az `flush_every` mellett)
+- `0` = kikapcsolva
+
+### Consumer Group vs. fájl alapú offset
+
+| `consumer_group` | Offset tárolás | Storno szűrés | Stabilitás |
+|------------------|----------------|---------------|------------|
+| `false` | `consumer_offsets.json` | ✅ Igen | ✅ Stabil |
+| `true` | Kafka `__consumer_offsets` | ❌ Nincs (tripletHandler nem használja) | ✅ Stabil (Metadata.RefreshFrequency fix) |
+
+**Consumer Group partition assignment:** Sarama alapból 10 percig cache-eli a metadata-t. Ha a topic a consumer előtt jön létre (pl. producer előbb fut), vagy a group törlése után gyorsan indul a consumer, elavult metadata miatt csak 1 partition kerülhet assignment-re. A `Metadata.RefreshFrequency = 5s` biztosítja, hogy a balance során friss partition lista legyen. A `consumer.ps1` indulás előtt törli a group-ot, így mind a 3 partition hozzárendelődik.
+
+### Optimalizációk (Go consumer)
+
+| Terület | Megvalósítás | Hatás |
+|---------|--------------|-------|
+| **parseMsg** | `strings.Split` + `strconv.ParseInt` regex helyett | Gyorsabb parsing |
+| **offset save** | `json.Marshal` (kompakt) `MarshalIndent` helyett | Kevesebb I/O |
+| **eviction** | Egy iteráció a min ID keresésére | Fél O(n) |
+| **storno save** | 100 ms debounce – nem minden üzenetnél ment | Kevesebb fájl I/O |
+| **storno/offset** | `strconv` a `fmt.Sscanf` helyett | Gyorsabb konverzió |
 
 ---
 
@@ -160,9 +226,10 @@ producer:
 
 consumer:
   output_file: "../output/houses.jsonl"
-  flush_every: 100
+  flush_every: 1        # 1 = max crash safety, 100 = gyorsabb
   log_every: 1000
-  # Offsets saved to output/consumer_offsets.json; delete that file to re-read from beginning
+  offset_save_interval_sec: 30   # időzített offset mentés (0 = kikapcsolva)
+  consumer_group: true    # true = Kafka offset (Metadata.RefreshFrequency fix), false = fájl offset
 ```
 
 ---
@@ -171,3 +238,22 @@ consumer:
 
 - **Producer/Consumer:** Ctrl+C (handled gracefully)
 - **Kafka:** `docker compose down`
+- **Stop all:** `.\run\stop.ps1` – stops producer and consumer processes
+
+## Reset
+
+Clear output folder and delete Kafka topics (fresh start):
+
+```powershell
+.\run\reset.ps1
+```
+
+Use `-KeepKafka` to keep topics: `.\run\reset.ps1 -KeepKafka`
+
+### Reset offsets (Consumer Group mode)
+
+When `consumer_group: true`, offsets are stored in Kafka. To reset and re-read from the beginning:
+
+```powershell
+docker exec -it docker_kafka_project-kafka-1 /opt/kafka/bin/kafka-consumer-groups.sh --bootstrap-server localhost:9092 --group house-triplet-consumer --topic teszt-partitioned --reset-offsets --to-earliest --execute
+```

@@ -1,5 +1,5 @@
 # Start Kafka via Docker Compose
-# Run from project root
+Write-Host "=== PROCESS: Kafka (Docker) ===" -ForegroundColor Cyan
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $ProjectRoot
 docker compose up -d

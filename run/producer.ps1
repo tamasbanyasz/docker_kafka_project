@@ -1,5 +1,5 @@
 # Start the 3-partition Kafka producer (Python)
-# Run from project root
+Write-Host "=== PROCESS: Producer (Python) ===" -ForegroundColor Cyan
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $ProjectRoot
 
